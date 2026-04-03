@@ -1,399 +1,416 @@
-# ==============================================================
-#  FocusFlow: The Gamified Study Engine
-#  A single-file Python terminal app for a Computational Thinking project.
-#
-#  Computational Thinking Concepts Used:
-#  ► DECOMPOSITION  : The problem is broken into smaller functions,
-#                     each handling one responsibility.
-#  ► ABSTRACTION    : Complex logic (XP math, boss battles, file I/O)
-#                     is hidden inside functions so the main menu
-#                     stays simple and readable.
-#  ► PATTERN REC.   : Level-up and achievement checks follow a
-#                     repeating pattern triggered after every task.
-#  ► ALGORITHMS     : Step-by-step logic for XP gain, boss battles,
-#                     saving/loading data.
-# ==============================================================
+"""
+FocusFlow: The Gamified Study Engine — Tkinter GUI Edition
+==========================================================
+Computational Thinking Concepts:
+  - Decomposition : Each feature is its own function
+  - Abstraction   : UI separated from data/logic
+  - Algorithm     : XP, level-up, boss-battle logic
+  - Data Struct.  : Dictionary holds all profile state
+"""
 
-import random   # For generating random math problems in the Boss Battle
-import os       # For checking if the save file exists
+import tkinter as tk
+from tkinter import ttk, messagebox, simpledialog
+import random
+import os
 
-# ── Constants ─────────────────────────────────────────────────
-SAVE_FILE       = "focus_save.txt"  # File used for saving/loading progress
-XP_PER_MINUTE   = 5                 # XP earned per minute of study time
-XP_TO_LEVEL     = 100               # XP required to reach the next level
-BOSS_TASK_LIMIT = 3                 # A boss appears every N completed tasks
-BOSS_BONUS_XP   = 50                # Bonus XP for defeating the boss
-SEPARATOR       = "=" * 52          # Reusable ASCII border line
+# ─────────────────────────────────────────────
+# CONSTANTS
+# ─────────────────────────────────────────────
+SAVE_FILE     = "focus_save.txt"
+XP_PER_TASK   = 20
+XP_PER_LEVEL  = 100
+BOSS_EVERY    = 3       # Boss appears every N completed tasks
+BOSS_BONUS_XP = 50
 
+ACHIEVEMENTS = {
+    5:  "📚 Bookworm    — 5 tasks done!",
+    10: "🔥 On Fire     — 10 tasks done!",
+    25: "⚡ Study Beast  — 25 tasks done!",
+    50: "🏆 Legend       — 50 tasks done!",
+}
 
-# ══════════════════════════════════════════════════════════════
-#  SECTION 1 — PROFILE MANAGEMENT  (Abstraction)
-#  These functions hide all the complexity of creating and
-#  accessing the user's data dictionary.
-# ══════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────
+# DATA  (Decomposition: data layer)
+# ─────────────────────────────────────────────
 
-def create_profile(name: str) -> dict:
-    """
-    ABSTRACTION — Builds and returns the core user profile dictionary.
-    All other functions receive this dict and interact with it.
-    """
+def default_profile(name: str) -> dict:
+    """Create a fresh character dictionary — Abstraction over raw dict."""
     return {
-        "name":           name,
-        "level":          1,
-        "xp":             0,
-        "tasks_done":     0,   # Counts tasks since last boss encounter
-        "total_tasks":    0,   # Lifetime task count
-        "achievements":   [],  # List of unlocked achievement strings
+        "name"         : name,
+        "level"        : 1,
+        "xp"           : 0,
+        "tasks_done"   : 0,
+        "achievements" : [],
     }
 
-
-def check_achievements(profile: dict) -> None:
-    """
-    PATTERN RECOGNITION — Checks for repeating milestone patterns
-    and unlocks the matching achievement badge if not already earned.
-    """
-    # ── Achievement definitions: (condition_value, badge_string)
-    milestones = [
-        (profile["total_tasks"] >= 1,    "🏅 First Step   — Completed your 1st task!"),
-        (profile["total_tasks"] >= 5,    "🥉 Getting Warm  — Completed 5 tasks!"),
-        (profile["total_tasks"] >= 10,   "🥈 On a Roll     — Completed 10 tasks!"),
-        (profile["total_tasks"] >= 25,   "🥇 Study Machine — Completed 25 tasks!"),
-        (profile["level"]       >= 3,    "⭐ Rising Star   — Reached Level 3!"),
-        (profile["level"]       >= 5,    "🌟 Scholar       — Reached Level 5!"),
-        (profile["level"]       >= 10,   "💎 Legend        — Reached Level 10!"),
-    ]
-
-    for condition, badge in milestones:
-        if condition and badge not in profile["achievements"]:
-            profile["achievements"].append(badge)
-            print(f"\n  🎊  ACHIEVEMENT UNLOCKED: {badge}")
-
-
-# ══════════════════════════════════════════════════════════════
-#  SECTION 2 — DISPLAY  (Abstraction)
-#  Hides all formatting logic so the main loop stays clean.
-# ══════════════════════════════════════════════════════════════
-
-def show_stats(profile: dict) -> None:
-    """
-    ABSTRACTION — Displays the user's current stats in a formatted
-    terminal card. The main loop just calls show_stats(profile).
-    """
-    xp_needed      = XP_TO_LEVEL - profile["xp"]
-    bar_filled     = int((profile["xp"] / XP_TO_LEVEL) * 24)
-    xp_bar         = "█" * bar_filled + "░" * (24 - bar_filled)
-
-    print(f"\n  {SEPARATOR}")
-    print(f"  {'📊  FOCUSFLOW — STATS':^52}")
-    print(f"  {SEPARATOR}")
-    print(f"  👤  Name         : {profile['name']}")
-    print(f"  ⭐  Level        : {profile['level']}")
-    print(f"  ✨  XP           : {profile['xp']} / {XP_TO_LEVEL}  "
-          f"({xp_needed} XP to next level)")
-    print(f"  📈  Progress     : [{xp_bar}]")
-    print(f"  📚  Total Tasks  : {profile['total_tasks']}")
-    print()
-
-    if profile["achievements"]:
-        print(f"  🏆  Achievements ({len(profile['achievements'])}):")
-        for badge in profile["achievements"]:
-            print(f"      {badge}")
-    else:
-        print("  🏆  Achievements : None yet — keep studying!")
-
-    print(f"  {SEPARATOR}\n")
-
-
-# ══════════════════════════════════════════════════════════════
-#  SECTION 3 — TASK MANAGEMENT  (Decomposition)
-#  The task workflow is split into two functions:
-#  add_task()  → collects input from the user
-#  complete_task() → processes XP and level logic
-# ══════════════════════════════════════════════════════════════
-
-def add_task() -> tuple[str, int]:
-    """
-    DECOMPOSITION — Handles ONLY the task input step.
-    Validates that duration is a positive integer.
-    Returns (task_name, duration_in_minutes).
-    """
-    print(f"\n  {SEPARATOR}")
-    print(f"  {'📝  ADD A NEW STUDY TASK':^52}")
-    print(f"  {SEPARATOR}")
-
-    task_name = input("  Task name (e.g. 'Read Chapter 4'): ").strip()
-    if not task_name:
-        task_name = "Study Session"
-
-    # ── Input Validation Loop ─────────────────────────────────
-    while True:
-        raw = input("  Duration in minutes          : ").strip()
-        if raw.isdigit() and int(raw) > 0:
-            duration = int(raw)
-            break
-        print("  ⚠️   Please enter a whole positive number (e.g. 30).")
-
-    print(f"  {SEPARATOR}\n")
-    return task_name, duration
-
-
-def complete_task(profile: dict, task_name: str, duration: int) -> None:
-    """
-    DECOMPOSITION — Handles ONLY the XP/level logic after a task is added.
-    ABSTRACTION   — Callers don't need to know HOW XP or levels work.
-
-    Awards XP based on duration, checks for level-up(s), updates counters,
-    checks for achievements, then checks if a boss battle should trigger.
-    """
-    xp_earned = duration * XP_PER_MINUTE
-
-    profile["xp"]           += xp_earned
-    profile["tasks_done"]   += 1
-    profile["total_tasks"]  += 1
-
-    print(f"\n  ✅  '{task_name}' logged!  You earned +{xp_earned} XP "
-          f"({duration} min × {XP_PER_MINUTE} XP/min)")
-
-    # ── Level-Up Check (loop handles multiple level-ups at once) ──
-    while profile["xp"] >= XP_TO_LEVEL:
-        profile["xp"]    -= XP_TO_LEVEL
-        profile["level"] += 1
-        print(f"\n  {'*' * 52}")
-        print(f"  🎉  LEVEL UP!  {profile['name']} is now LEVEL {profile['level']}! 🎉")
-        print(f"  {'*' * 52}")
-
-    # ── Achievement Check ─────────────────────────────────────
-    check_achievements(profile)
-
-    # ── Boss Battle Check ─────────────────────────────────────
-    if profile["tasks_done"] >= BOSS_TASK_LIMIT:
-        profile["tasks_done"] = 0          # Reset counter
-        distraction_boss(profile)
-
-
-# ══════════════════════════════════════════════════════════════
-#  SECTION 4 — THE BOSS BATTLE  (Decomposition + Random Module)
-#  Every 3 completed tasks, a Distraction Monster appears.
-#  The user must solve a random math problem to defeat it.
-# ══════════════════════════════════════════════════════════════
-
-def distraction_boss(profile: dict) -> None:
-    """
-    DECOMPOSITION — An isolated mini-game function.
-    Uses the 'random' module to generate a math challenge.
-    Gives 3 attempts before the boss wins.
-    """
-    print(f"\n  {'!' * 52}")
-    print(f"  ⚔️   A DISTRACTION MONSTER HAS APPEARED! ⚔️")
-    print(f"  {'!' * 52}")
-    print("  The monster is trying to pull you off-task.")
-    print(f"  Defeat it by solving this math challenge to earn +{BOSS_BONUS_XP} Bonus XP!\n")
-
-    # ── Generate a random math problem ────────────────────────
-    a, b      = random.randint(10, 50), random.randint(10, 50)
-    operator  = random.choice(["+", "-", "*"])
-
-    if operator == "+":
-        answer = a + b
-    elif operator == "-":
-        answer = a - b
-    else:
-        answer = a * b
-
-    print(f"  ❓  What is  {a} {operator} {b}  ?")
-    print()
-
-    max_attempts = 3
-
-    for attempt in range(1, max_attempts + 1):
-        # ── Input Validation ───────────────────────────────────
-        raw = input(f"  Your answer (Attempt {attempt}/{max_attempts}): ").strip()
-
-        if not raw.lstrip("-").isdigit():
-            print("  ⚠️   Numbers only — try again.\n")
-            continue
-
-        if int(raw) == answer:
-            profile["xp"] += BOSS_BONUS_XP
-            print(f"\n  🏆  CORRECT!  Monster defeated!  +{BOSS_BONUS_XP} Bonus XP!")
-
-            # ── Check for level-up from bonus XP ──────────────
-            while profile["xp"] >= XP_TO_LEVEL:
-                profile["xp"]    -= XP_TO_LEVEL
-                profile["level"] += 1
-                print(f"  🎉  LEVEL UP from Boss Bonus!  Now Level {profile['level']}!")
-
-            print(f"  {'!' * 52}\n")
-            return  # Boss defeated — exit function
-
-        else:
-            remaining = max_attempts - attempt
-            if remaining > 0:
-                print(f"  ❌  Wrong!  {remaining} attempt(s) left.\n")
-            else:
-                print(f"\n  💀  The Distraction Monster wins this round...")
-                print(f"      The correct answer was {answer}.")
-                print(f"      Stay focused next time, {profile['name']}!")
-                print(f"  {'!' * 52}\n")
-
-
-# ══════════════════════════════════════════════════════════════
-#  SECTION 5 — FILE I/O  (Decomposition)
-#  Save/load are completely separate from all other logic.
-#  They write and read a plain-text file named focus_save.txt.
-# ══════════════════════════════════════════════════════════════
-
 def save_data(profile: dict) -> None:
-    """
-    DECOMPOSITION — Handles ONLY the write-to-file step.
-    Saves each profile field on its own line for easy parsing.
-    """
-    try:
-        with open(SAVE_FILE, "w") as f:
-            f.write(f"name={profile['name']}\n")
-            f.write(f"level={profile['level']}\n")
-            f.write(f"xp={profile['xp']}\n")
-            f.write(f"tasks_done={profile['tasks_done']}\n")
-            f.write(f"total_tasks={profile['total_tasks']}\n")
-
-            # Achievements are joined with a pipe "|" so they fit on one line
-            achievements_str = "|".join(profile["achievements"])
-            f.write(f"achievements={achievements_str}\n")
-
-        print(f"\n  💾  Progress saved to '{SAVE_FILE}'  ✔")
-
-    except IOError as e:
-        print(f"\n  ⚠️   Could not save file: {e}")
-
+    """Algorithm: Serialise profile to focus_save.txt as key=value lines."""
+    with open(SAVE_FILE, "w") as f:
+        f.write(f"name={profile['name']}\n")
+        f.write(f"level={profile['level']}\n")
+        f.write(f"xp={profile['xp']}\n")
+        f.write(f"tasks_done={profile['tasks_done']}\n")
+        achievements_str = "|".join(profile["achievements"])
+        f.write(f"achievements={achievements_str}\n")
 
 def load_data() -> dict | None:
-    """
-    DECOMPOSITION — Handles ONLY the read-from-file step.
-    Returns a fully restored profile dict, or None if no save exists.
-    """
+    """Algorithm: Parse focus_save.txt back into a profile dictionary."""
     if not os.path.exists(SAVE_FILE):
-        return None     # No save file found — signal caller to create a new profile
-
-    try:
-        profile = {}
-        with open(SAVE_FILE, "r") as f:
-            for line in f:
-                line = line.strip()
-                if "=" not in line:
-                    continue
-                key, _, value = line.partition("=")
-
-                # ── Restore each field with its correct data type ──
-                if key == "name":
-                    profile["name"] = value
-                elif key == "level":
-                    profile["level"] = int(value)
-                elif key == "xp":
-                    profile["xp"] = int(value)
-                elif key == "tasks_done":
-                    profile["tasks_done"] = int(value)
-                elif key == "total_tasks":
-                    profile["total_tasks"] = int(value)
-                elif key == "achievements":
-                    profile["achievements"] = value.split("|") if value else []
-
-        # Guard: ensure all expected keys exist (handles old/corrupt saves)
-        required_keys = ["name", "level", "xp", "tasks_done", "total_tasks", "achievements"]
-        if not all(k in profile for k in required_keys):
-            print("  ⚠️   Save file is incomplete. Starting fresh.")
-            return None
-
-        return profile
-
-    except (IOError, ValueError) as e:
-        print(f"\n  ⚠️   Could not load save file: {e}  Starting fresh.")
         return None
+    profile = {}
+    with open(SAVE_FILE, "r") as f:
+        for line in f:
+            line = line.strip()
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            if key in ("level", "tasks_done"):
+                profile[key] = int(value)
+            elif key == "xp":
+                profile[key] = int(value)
+            elif key == "achievements":
+                profile[key] = [a for a in value.split("|") if a]
+            else:
+                profile[key] = value
+    # Guard: ensure all expected keys exist
+    for k, default in [("level",1),("xp",0),("tasks_done",0),("achievements",[])]:
+        profile.setdefault(k, default)
+    return profile
 
+# ─────────────────────────────────────────────
+# BOSS BATTLE  (Decomposition: isolated feature)
+# ─────────────────────────────────────────────
 
-# ══════════════════════════════════════════════════════════════
-#  SECTION 6 — MAIN MENU LOOP  (Core Algorithm + Decomposition)
-#  The main() function is the entry point and the glue layer.
-#  It calls the other functions but contains NO complex logic itself.
-# ══════════════════════════════════════════════════════════════
-
-def main():
+def run_boss_battle(parent) -> int:
     """
-    ALGORITHM — Controls the program's main flow:
-    1. Display welcome screen
-    2. Load save or create new profile
-    3. Loop on main menu until user exits
-    4. Offer to save on exit
+    Distraction Boss mini-game.
+    Returns XP bonus earned (50 on win, 0 on loss).
+    Uses random module for math challenge generation.
     """
+    a  = random.randint(10, 50)
+    b  = random.randint(5,  30)
+    op = random.choice(["+", "-", "*"])
+    answer = eval(f"{a}{op}{b}")   # safe: operands are ints, op is controlled
 
-    # ── Welcome Banner ────────────────────────────────────────
-    print(f"\n  {SEPARATOR}")
-    print(f"  {'🎯  FOCUSFLOW: THE GAMIFIED STUDY ENGINE  🎯':^52}")
-    print(f"  {SEPARATOR}")
-    print(f"  {'Study Hard. Level Up. Defeat Distractions.':^52}")
-    print(f"  {SEPARATOR}\n")
+    messagebox.showwarning(
+        "⚠️  DISTRACTION BOSS APPEARED!",
+        f"A wild Distraction Monster blocks your path!\n\n"
+        f"Solve this to defeat it:\n\n"
+        f"   {a}  {op}  {b}  = ?\n\n"
+        "Click OK then type your answer.",
+        parent=parent
+    )
 
-    # ── Load Existing Save or Create New Profile ──────────────
-    profile = load_data()
+    for attempt in range(1, 4):          # 3 attempts
+        raw = simpledialog.askstring(
+            "Boss Battle",
+            f"Attempt {attempt}/3 — What is  {a} {op} {b}?",
+            parent=parent
+        )
+        if raw is None:                  # user cancelled
+            break
+        raw = raw.strip()
+        # Input validation — handle negatives
+        if not raw.lstrip("-").lstrip().isdigit():
+            messagebox.showerror("Invalid", "Please enter a number!", parent=parent)
+            continue
+        if int(raw) == answer:
+            messagebox.showinfo(
+                "⚔️  BOSS DEFEATED!",
+                f"Correct! The answer was {answer}.\n"
+                f"You earn +{BOSS_BONUS_XP} Bonus XP! 🎉",
+                parent=parent
+            )
+            return BOSS_BONUS_XP
 
-    if profile:
-        print(f"  ✔   Save file found!  Welcome back, {profile['name']}!")
-        show_stats(profile)
-    else:
-        print("  No save file found — let's create your character!\n")
-        name    = input("  Enter your name: ").strip() or "Student"
-        profile = create_profile(name)
-        print(f"\n  Adventure begins!  Good luck, {profile['name']}! 🚀\n")
+    messagebox.showerror(
+        "💀 Boss Won...",
+        f"The correct answer was {answer}.\n"
+        "No bonus XP this time. Stay focused! 💪",
+        parent=parent
+    )
+    return 0
 
-    # ── Main Menu (Core while True Loop) ─────────────────────
-    # DECOMPOSITION — Each menu option is handled by its own function.
-    while True:
-        print(f"  {SEPARATOR}")
-        print(f"  {'📋  MAIN MENU':^52}")
-        print(f"  {SEPARATOR}")
-        print("  [1]  Add & Complete a Study Task")
-        print("  [2]  View My Stats")
-        print("  [3]  Save Progress")
-        print("  [4]  Exit")
-        print(f"  {SEPARATOR}")
+# ─────────────────────────────────────────────
+# MAIN GUI CLASS  (Abstraction: UI layer)
+# ─────────────────────────────────────────────
 
-        choice = input("  Choose an option (1-4): ").strip()
+class FocusFlowApp(tk.Tk):
+    """Main application window — all widgets and event handlers live here."""
 
-        # ── Option 1: Log a Task ──────────────────────────────
-        if choice == "1":
-            task_name, duration = add_task()
-            complete_task(profile, task_name, duration)
+    # ── Initialisation ──────────────────────────────────────────────────────
+    def __init__(self):
+        super().__init__()
+        self.title("🎮  FocusFlow — Gamified Study Engine")
+        self.resizable(False, False)
+        self.configure(bg="#1e1e2e")
 
-        # ── Option 2: View Stats ──────────────────────────────
-        elif choice == "2":
-            show_stats(profile)
-
-        # ── Option 3: Save ────────────────────────────────────
-        elif choice == "3":
-            save_data(profile)
-
-        # ── Option 4: Exit ────────────────────────────────────
-        elif choice == "4":
-            print(f"\n  {SEPARATOR}")
-
-            # Ask whether to save before quitting
-            save_choice = input("  Save your progress before exiting? (y/n): ").strip().lower()
-            if save_choice == "y":
-                save_data(profile)
-
-            print(f"\n  👋  Goodbye, {profile['name']}!")
-            print(f"      Final rank : Level {profile['level']}  |  "
-                  f"{profile['xp']} XP  |  "
-                  f"{profile['total_tasks']} task(s) completed")
-            print(f"  {SEPARATOR}")
-            print(f"  {'Keep studying. Stay focused. You got this! 💪':^52}")
-            print(f"  {SEPARATOR}\n")
-            break   # Exit the while True loop → program ends
-
-        # ── Invalid Input ─────────────────────────────────────
+        # Load existing save or prompt for name
+        saved = load_data()
+        if saved:
+            self.profile = saved
+            restored = True
         else:
-            print("\n  ⚠️   Invalid choice. Please enter 1, 2, 3, or 4.\n")
+            name = self._ask_name()
+            self.profile = default_profile(name)
+            restored = False
+
+        self._build_ui()
+        self._refresh_ui()
+
+        if restored:
+            messagebox.showinfo(
+                "Welcome Back!",
+                f"Progress restored for {self.profile['name']}!\n"
+                f"Level {self.profile['level']}  •  "
+                f"{self.profile['xp']} XP  •  "
+                f"{self.profile['tasks_done']} tasks done 🚀",
+                parent=self
+            )
+
+    def _ask_name(self) -> str:
+        """Prompt for player name with fallback."""
+        name = simpledialog.askstring(
+            "Welcome to FocusFlow!",
+            "Enter your name to begin your journey:",
+            parent=self
+        )
+        return (name.strip() if name and name.strip() else "Student")
+
+    # ── UI Construction ──────────────────────────────────────────────────────
+    def _build_ui(self):
+        """Decomposition: every section of the UI is built by a helper call."""
+        PAD = {"padx": 20, "pady": 8}
+
+        # ── Header ──────────────────────────────────────────────────────────
+        header = tk.Frame(self, bg="#313244", pady=12)
+        header.pack(fill="x")
+        tk.Label(
+            header, text="🎮  FocusFlow", font=("Helvetica", 22, "bold"),
+            fg="#cba6f7", bg="#313244"
+        ).pack()
+        tk.Label(
+            header, text="Gamified Study Engine",
+            font=("Helvetica", 10), fg="#a6adc8", bg="#313244"
+        ).pack()
+
+        # ── Stats card ──────────────────────────────────────────────────────
+        card = tk.Frame(self, bg="#313244", padx=20, pady=14, relief="flat")
+        card.pack(fill="x", **PAD)
+
+        self.lbl_name  = tk.Label(card, font=("Helvetica", 13, "bold"),
+                                  fg="#cdd6f4", bg="#313244")
+        self.lbl_level = tk.Label(card, font=("Helvetica", 11),
+                                  fg="#89b4fa", bg="#313244")
+        self.lbl_xp    = tk.Label(card, font=("Helvetica", 11),
+                                  fg="#a6e3a1", bg="#313244")
+        self.lbl_tasks = tk.Label(card, font=("Helvetica", 10),
+                                  fg="#f38ba8", bg="#313244")
+
+        self.lbl_name .pack(anchor="w")
+        self.lbl_level.pack(anchor="w")
+        self.lbl_xp   .pack(anchor="w")
+        self.lbl_tasks.pack(anchor="w")
+
+        # ── XP Progress bar ─────────────────────────────────────────────────
+        pb_frame = tk.Frame(self, bg="#1e1e2e")
+        pb_frame.pack(fill="x", padx=20, pady=4)
+
+        tk.Label(pb_frame, text="XP Progress", font=("Helvetica", 9),
+                 fg="#a6adc8", bg="#1e1e2e").pack(anchor="w")
+
+        style = ttk.Style(self)
+        style.theme_use("clam")
+        style.configure(
+            "XP.Horizontal.TProgressbar",
+            troughcolor="#313244",
+            background="#cba6f7",
+            thickness=22,
+            bordercolor="#1e1e2e",
+        )
+        self.progress = ttk.Progressbar(
+            pb_frame, style="XP.Horizontal.TProgressbar",
+            orient="horizontal", length=360,
+            mode="determinate", maximum=XP_PER_LEVEL
+        )
+        self.progress.pack(fill="x", pady=4)
+
+        self.lbl_progress = tk.Label(pb_frame, font=("Helvetica", 9),
+                                     fg="#a6adc8", bg="#1e1e2e")
+        self.lbl_progress.pack(anchor="e")
+
+        # ── Action button ────────────────────────────────────────────────────
+        self.btn_task = tk.Button(
+            self,
+            text="✅  Complete Study Session  (+20 XP)",
+            font=("Helvetica", 12, "bold"),
+            bg="#cba6f7", fg="#1e1e2e",
+            activebackground="#b4befe",
+            relief="flat", cursor="hand2", pady=10,
+            command=self._on_complete_task
+        )
+        self.btn_task.pack(fill="x", padx=20, pady=10)
+
+        # ── Achievements panel ───────────────────────────────────────────────
+        ach_outer = tk.Frame(self, bg="#1e1e2e")
+        ach_outer.pack(fill="x", padx=20, pady=(0, 6))
+        tk.Label(ach_outer, text="🏆  Achievements",
+                 font=("Helvetica", 10, "bold"),
+                 fg="#f9e2af", bg="#1e1e2e").pack(anchor="w")
+
+        self.lbl_achievements = tk.Label(
+            ach_outer, text="", font=("Helvetica", 9),
+            fg="#a6adc8", bg="#1e1e2e",
+            justify="left", wraplength=340
+        )
+        self.lbl_achievements.pack(anchor="w")
+
+        # ── Footer buttons ───────────────────────────────────────────────────
+        foot = tk.Frame(self, bg="#1e1e2e")
+        foot.pack(fill="x", padx=20, pady=(4, 16))
+
+        tk.Button(
+            foot, text="💾  Save", font=("Helvetica", 10),
+            bg="#313244", fg="#a6e3a1",
+            activebackground="#45475a",
+            relief="flat", cursor="hand2", padx=12, pady=6,
+            command=self._on_save
+        ).pack(side="left", padx=(0, 6))
+
+        tk.Button(
+            foot, text="🔄  Reset", font=("Helvetica", 10),
+            bg="#313244", fg="#f38ba8",
+            activebackground="#45475a",
+            relief="flat", cursor="hand2", padx=12, pady=6,
+            command=self._on_reset
+        ).pack(side="left")
+
+        tk.Button(
+            foot, text="❌  Exit", font=("Helvetica", 10),
+            bg="#313244", fg="#cdd6f4",
+            activebackground="#45475a",
+            relief="flat", cursor="hand2", padx=12, pady=6,
+            command=self._on_exit
+        ).pack(side="right")
+
+    # ── UI Refresh  (Abstraction: one call syncs all labels) ─────────────────
+    def _refresh_ui(self):
+        """Sync every widget to the current profile state."""
+        p = self.profile
+        xp_in_level = p["xp"] % XP_PER_LEVEL
+
+        self.lbl_name .config(text=f"👤  {p['name']}")
+        self.lbl_level.config(text=f"⭐  Level  {p['level']}")
+        self.lbl_xp   .config(text=f"✨  Total XP: {p['xp']}")
+        self.lbl_tasks.config(text=f"📋  Tasks Completed: {p['tasks_done']}")
+
+        self.progress["value"]  = xp_in_level
+        self.lbl_progress.config(
+            text=f"{xp_in_level} / {XP_PER_LEVEL} XP  to next level"
+        )
+
+        if p["achievements"]:
+            self.lbl_achievements.config(
+                text="\n".join(p["achievements"])
+            )
+        else:
+            self.lbl_achievements.config(text="None yet — keep studying!")
+
+    # ── Core Logic (Decomposition: each action is its own method) ────────────
+    def _on_complete_task(self):
+        """Complete a study session: award XP, check level-up, maybe boss."""
+        p = self.profile
+
+        # Award XP
+        p["xp"]         += XP_PER_TASK
+        p["tasks_done"] += 1
+
+        # Check achievements (Pattern Recognition)
+        self._check_achievements()
+
+        # Level-up loop (handles multiple level-ups at once)
+        levelled_up = False
+        while p["xp"] >= p["level"] * XP_PER_LEVEL:
+            p["level"] += 1
+            levelled_up = True
+
+        if levelled_up:
+            messagebox.showinfo(
+                "🎉  LEVEL UP!",
+                f"Amazing work, {p['name']}!\n\n"
+                f"You reached  ⭐ Level {p['level']} ⭐\n\n"
+                "Keep crushing those study sessions! 🚀",
+                parent=self
+            )
+
+        # Boss battle every BOSS_EVERY tasks
+        if p["tasks_done"] % BOSS_EVERY == 0:
+            bonus = run_boss_battle(self)
+            if bonus:
+                p["xp"] += bonus
+                # Re-check level-up after bonus XP
+                while p["xp"] >= p["level"] * XP_PER_LEVEL:
+                    p["level"] += 1
+                    messagebox.showinfo(
+                        "🎉  LEVEL UP!",
+                        f"Bonus XP pushed you to Level {p['level']}! 🔥",
+                        parent=self
+                    )
+        else:
+            messagebox.showinfo(
+                "✅  Session Complete!",
+                f"+{XP_PER_TASK} XP earned!\n\n"
+                f"Total XP: {p['xp']}  •  Level: {p['level']}\n\n"
+                f"Tasks done: {p['tasks_done']}",
+                parent=self
+            )
+
+        save_data(p)
+        self._refresh_ui()
+
+    def _check_achievements(self):
+        """Pattern Recognition: unlock badges at task milestones."""
+        p    = self.profile
+        done = p["tasks_done"]
+        if done in ACHIEVEMENTS:
+            badge = ACHIEVEMENTS[done]
+            if badge not in p["achievements"]:
+                p["achievements"].append(badge)
+                messagebox.showinfo(
+                    "🏆  Achievement Unlocked!",
+                    badge, parent=self
+                )
+
+    def _on_save(self):
+        save_data(self.profile)
+        messagebox.showinfo("💾  Saved",
+                            "Your progress has been saved!", parent=self)
+
+    def _on_reset(self):
+        if messagebox.askyesno(
+            "🔄  Reset",
+            "This will erase ALL progress.\nAre you sure?",
+            parent=self
+        ):
+            name = self._ask_name()
+            self.profile = default_profile(name)
+            if os.path.exists(SAVE_FILE):
+                os.remove(SAVE_FILE)
+            self._refresh_ui()
+            messagebox.showinfo("Reset Complete",
+                                f"New journey started for {name}! 🌟",
+                                parent=self)
+
+    def _on_exit(self):
+        save_data(self.profile)
+        self.destroy()
 
 
-# ── Entry Point ───────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# ENTRY POINT
+# ─────────────────────────────────────────────
 if __name__ == "__main__":
-    main()
+    app = FocusFlowApp()
+    app.mainloop()
